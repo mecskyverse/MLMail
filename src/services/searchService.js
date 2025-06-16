@@ -1,30 +1,39 @@
-const { MongoClient } = require('mongodb');
-const { generateEmbeddings } = require('./aiService');
+// const { generateEmbeddings } = require('./aiService');
 const config = require('../config/config');
+const {
+  VectorStoreIndex,
+  PineconeVectorStore,
+  serviceContextFromDefaults
+} = require("llamaindex");
+const { Pinecone } =  require('@pinecone-database/pinecone');
+const OpenAI = require("openai");
 
-const cosineSimilarity = (vecA, vecB) => {
-  const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
-  const normA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
-  const normB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
-  return dotProduct / (normA * normB);
-};
+const pc = new Pinecone({apiKey: process.env.PINECONE_API_KEY});
+const openai = new OpenAI({apiKey: process.env.OPENAI_API_KEY});
 
-const searchEmails = async (query) => {
-  const client = new MongoClient(config.mongodbUri);
-  await client.connect();
-  const db = client.db();
+const searchEmails = async (query = 'Who is Amanda') => {
+  try {
+    const index = pc.index('text-embedding-3-small');
 
-  const queryEmbeddings = await generateEmbeddings(query);
-  const emails = await db.collection('emails').find().toArray();
+  const indexOutput = await index.describeIndexStats()
+  const serviceContext = serviceContextFromDefaults();
+  let vector_store = new PineconeVectorStore()
+  let vector_index = await VectorStoreIndex.fromVectorStore(vector_store)
+  // let retriever = new VectorIndexRetriever({index: vector_index, similarityTopK: 5, serviceContext})
+  // const answer = await retriever.retrieve({query: 'Who is Aakash'})
+  // console.log(answer)
 
-  const results = emails.map(email => {
-    const emailEmbeddings = email.embeddings;
-    const similarity = cosineSimilarity(queryEmbeddings, emailEmbeddings);
-    return { ...email, similarity };
-  }).sort((a, b) => b.similarity - a.similarity);
+  const queryEngine = await vector_index.asQueryEngine()
+  const llmQuery = await queryEngine.query({query : query})
+  console.log(llmQuery.message)
 
-  await client.close();
-  return results;
-};
+  // Output response with sources
+  // console.log(response);
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+searchEmails()
 
 module.exports = { searchEmails };
